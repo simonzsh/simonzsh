@@ -34,5 +34,5 @@ Hi 👋, I'm Simon!
 ### 🐈‍⬛ GitHub Stats
 
 <div>
-  <a href="#"><img src="https://github-readme-activity-graph.vercel.app/graph?username=extrymes&theme=github-compact&bg_color=0ffffff&line=02bf0b&point=0038509&area=true&hide_border=true" alt="extrymes" /></a>
+  <a href="#"><img src="https://github-readme-activity-graph.vercel.app/graph?username=simonzsh&theme=github-compact&bg_color=0ffffff&line=02bf0b&point=0038509&area=true&hide_border=true" alt="simonzsh" /></a>
 <div>
