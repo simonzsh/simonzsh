@@ -10,7 +10,7 @@ from html import escape
 LOGIN = "simonzsh"
 ABOUT = [
     ("Name", "Simon"),
-    ("Role", "Software developer"),
+    ("Role", "Software engineer"),
     ("Status", "Freelancer"),
     ("From", "Belgium, based in France"),
     ("School", "42 Paris, since May 2024"),
@@ -40,9 +40,15 @@ BG, BAR, TEXT, DIM = "#1a1b26", "#16161e", "#c0caf5", "#7986b7"
 GREEN, BLUE, PURPLE, RED = "#9ece6a", "#7aa2f7", "#bb9af7", "#f7768e"
 WIDTH, BAR_H, PAD_X, PAD_Y = 800, 40, 12, 54
 CHAR, LINE = 9.6, 28.8  # monospace 16px: char width, line height
-TYPE_MS, IDLE_MS, OUT_MS, STAGGER_MS, END_MS = 70, 800, 300, 50, 200
+TYPE_MS, IDLE_MS, OUT_MS, STAGGER_MS, END_MS = 70, 500, 200, 50, 200
 BLINK_MS = 1600  # full on/off cycle of the last cursor
-CHART_ROWS = 6
+CHART_ROWS = 4
+HOST = "github.com"
+PASS_LEN, PASS_WAIT_MS, PASS_MS, ENTER_MS = 12, 350, 65, 250  # password typed blind
+LAST_LOGIN_FROM = "Paris"
+# Default prompts: zsh on a Mac (local), bash on Ubuntu (remote, after the ssh login).
+LOCAL_PROMPT = "simon@MacBook-Pro ~ % "
+REMOTE_PROMPT = f"{LOGIN}@github:~$ "
 NBSP = " "  # plain spaces are collapsed by some SVG renderers
 BARS = "▁▂▃▄▅▆▇█"
 
@@ -80,14 +86,15 @@ def streaks(days, today):
 
 
 def chart(weeks):
-    """Bar chart of weekly totals: one column per week, 8 levels per text row.
+    """Compact bar chart: one column per 2 weeks, 8 levels per text row.
 
-    weeks is a list of (first day, total). Bars blend from blue (low) to purple (high).
+    weeks is a list of (first day, total). Returns CHART_ROWS bar rows plus a
+    month row. Bars blend from blue (low) to purple (high).
     """
-    values = [n for _, n in weeks]
+    pairs = [weeks[i:i + 2] for i in range(0, len(weeks), 2)]
+    values = [sum(n for _, n in p) for p in pairs]
     top = max(values) or 1
-    pad = 2 * NBSP
-    rows = [[(pad + "Contributions per week", DIM)]]
+    rows = []
     for r in range(CHART_ROWS - 1, -1, -1):
         cells = ""
         for v in values:
@@ -97,18 +104,28 @@ def chart(weeks):
             cells += BARS[level - 1] if level else NBSP
         label = str(top) if r == CHART_ROWS - 1 else ""
         color = mix(BLUE, PURPLE, r / (CHART_ROWS - 1))
-        rows.append([(pad + label.rjust(4, NBSP) + "│", DIM), (cells, color)])
-    rows.append([(pad + "0".rjust(4, NBSP) + "└" + "─" * len(values), DIM)])
-    # Month names under the first week of each month. The first, partial month
-    # is skipped when the next label would overlap it.
-    starts = [(i, first.strftime("%b")) for i, (first, _) in enumerate(weeks) if i == 0 or first.month != weeks[i - 1][0].month]
-    if len(starts) > 1 and starts[1][0] < 4:
+        rows.append([(label.rjust(4, NBSP) + "│", DIM), (cells, color)])
+    # Month initials under the first column of each month. The first, partial
+    # month is skipped when the next initial would touch it.
+    firsts = [p[0][0] for p in pairs]
+    starts = [i for i, f in enumerate(firsts) if i == 0 or f.month != firsts[i - 1].month]
+    if len(starts) > 1 and starts[1] < 2:
         starts = starts[1:]
     months = [NBSP] * len(values)
-    for i, name in starts:
-        if i + 3 <= len(values):
-            months[i:i + 3] = name
-    rows.append([(pad + NBSP * 5 + "".join(months), DIM)])
+    for i in starts:
+        months[i] = firsts[i].strftime("%b")[0]
+    rows.append([(NBSP * 5 + "".join(months), DIM)])
+    return rows
+
+
+def side_by_side(left, right, gap=3):
+    """Join two lists of segment rows into one, with the right block aligned."""
+    width = max(sum(len(t) for t, _ in row) for row in left) + gap
+    rows = []
+    for i in range(max(len(left), len(right))):
+        row = list(left[i]) if i < len(left) else []
+        pad = width - sum(len(t) for t, _ in row)
+        rows.append(row + [(NBSP * pad, DIM)] + (right[i] if i < len(right) else []))
     return rows
 
 
@@ -157,7 +174,8 @@ def fetch_stats():
         ("  Active days", f"{sum(1 for _, n in days if n)} / {len(days)}"),
         ("  Streak", f"{current} days now, {longest} days best"),
         ("  Busiest day", f"{best[1]} on {best[0].strftime('%b %d, %Y')}"),
-    ]) + chart(weeks)
+    ])
+    commits = side_by_side(commits, chart(weeks))
     return github, commits
 
 
@@ -197,16 +215,22 @@ def steam_cup(y, start):
 def build():
     github, commits = fetch_stats()
     about = [[(NBSP * ART_W, DIM)] + row for row in kv(ABOUT)]
-    blocks = [
-        ("cat about.txt", [text_row(r) for r in about], steam_cup),
-        (f"gh stats {LOGIN}", [text_row(r) for r in github], None),
-        (f"gh commits {LOGIN}", [text_row(r) for r in commits], None),
-        ("", [], None),  # last prompt, waits for input with a blinking cursor
+    now = datetime.now()
+    welcome = [
+        [("Welcome to GitHub 24.04 LTS (GNU/Linux 6.8.0 x86_64)", TEXT)],
+        [(f"Last login: {now:%a %b %d %H:%M:%S %Y} from {LAST_LOGIN_FROM}", DIM)],
     ]
-    prompt = f"{LOGIN}:~$ "
-    pw = len(prompt) * CHAR
+    blocks = [
+        (LOCAL_PROMPT, f"ssh {LOGIN}@{HOST}", [(f"{LOGIN}@{HOST}'s password: ", PASS_LEN)] + [text_row(r) for r in welcome], None),
+        (REMOTE_PROMPT, "cat about.txt", [text_row(r) for r in about], steam_cup),
+        (REMOTE_PROMPT, f"gh stats {LOGIN}", [text_row(r) for r in github], None),
+        (REMOTE_PROMPT, f"gh commits {LOGIN}", [text_row(r) for r in commits], None),
+        (REMOTE_PROMPT, "exit", [text_row([(f"Connection to {HOST} closed.", TEXT)])], None),
+        (LOCAL_PROMPT, "", [], None),  # back on the Mac: waits for input with a blinking cursor
+    ]
     body, line, t = [], 0, 0
-    for i, (cmd, rows, overlay) in enumerate(blocks):
+    for i, (prompt, cmd, rows, overlay) in enumerate(blocks):
+        pw = len(prompt) * CHAR
         y = line * LINE
         type_at = t + (IDLE_MS if i else 0)  # the prompt shows first, then the typing starts
         type_ms = len(cmd) * TYPE_MS
@@ -235,15 +259,39 @@ def build():
             f'<rect x="{pw:.1f}" y="-14" width="10" height="16" fill="{BLUE}" opacity="0">{cursor}</rect></g>'
         )
         line += 1
+        cur = last_at = end + OUT_MS
         for k, row in enumerate(rows):
-            body.append(f'<g transform="translate(0, {(line + k) * LINE:.1f})" class="fade-in" style="animation-delay: {end + OUT_MS + k * STAGGER_MS}ms">{row}</g>')
+            ry = (line + k) * LINE
+            if isinstance(row, tuple):
+                # Password prompt: asterisks appear one by one, as typed blind.
+                label, n = row
+                lw = len(label) * CHAR
+                typed_end = cur + PASS_WAIT_MS + n * PASS_MS
+                stars = "".join(
+                    f'<text class="tt" x="{lw + j * CHAR:.1f}" fill="{TEXT}" visibility="hidden">'
+                    f'<set attributeName="visibility" to="visible" begin="{cur + PASS_WAIT_MS + j * PASS_MS}ms" fill="freeze"/>*</text>'
+                    for j in range(n)
+                )
+                body.append(
+                    f'<g transform="translate(0, {ry:.1f})"><g class="fade-in" style="animation-delay: {cur}ms">{text_row([(label, TEXT)])}</g>{stars}'
+                    f'<rect x="{lw:.1f}" y="-14" width="10" height="16" fill="{BLUE}" opacity="0">'
+                    f'<animate attributeName="opacity" from="0" to="1" begin="{cur}ms" dur="10ms" fill="freeze"/>'
+                    # The cursor moves one column per asterisk, like the typed text.
+                    f'<animate attributeName="x" values="{";".join(f"{lw + j * CHAR:.1f}" for j in range(n + 1))}" calcMode="discrete" '
+                    f'begin="{cur + PASS_WAIT_MS}ms" dur="{n * PASS_MS}ms" fill="freeze"/>'
+                    f'<animate attributeName="opacity" to="0" begin="{typed_end + ENTER_MS // 2}ms" dur="10ms" fill="freeze"/></rect></g>'
+                )
+                last_at, cur = cur, typed_end + ENTER_MS
+            else:
+                body.append(f'<g transform="translate(0, {ry:.1f})" class="fade-in" style="animation-delay: {cur}ms">{row}</g>')
+                last_at, cur = cur, cur + STAGGER_MS
         if overlay:
             body.append(overlay(line * LINE, end + OUT_MS))
         line += len(rows)
-        t = end + OUT_MS + max(len(rows) - 1, 0) * STAGGER_MS + END_MS if rows else t
+        t = last_at + END_MS if rows else t
 
     height = int(PAD_Y + (line - 1) * LINE + 24)
-    return f'''<svg width="{WIDTH}" height="{height}" viewBox="0 0 {WIDTH} {height}" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Animated terminal showing: {escape(", ".join(c for c, _, _ in blocks if c))}">
+    return f'''<svg width="{WIDTH}" height="{height}" viewBox="0 0 {WIDTH} {height}" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Animated terminal showing: {escape(", ".join(c for _, c, _, _ in blocks if c))}">
   <title>{LOGIN} terminal</title>
   <style>
     .tt {{ font-family: JetBrains Mono, Fira Code, Ubuntu Mono, Consolas, Monaco, monospace; font-size: 16px; white-space: pre; }}
