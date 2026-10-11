@@ -20,9 +20,16 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: python3 terminal.py
 
-      - name: Commit if changed
+      # The SVG lives on its own branch, rebuilt as a single commit each day.
+      # main keeps only the source, so it gets no refresh commits.
+      - name: Publish to the output branch
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
+          mkdir dist && mv terminal.svg dist/ && cd dist
+          git init -q -b output
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add terminal.svg
-          git diff --cached --quiet || { git commit -m "chore: refresh terminal SVG" && git push; }
+          git commit -q -m "chore: refresh terminal SVG"
+          git push -f "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" output
